@@ -59,10 +59,9 @@ def scale_image(img, image_scale):
 IMAGE_OFFSET = -90
 idle_player_image = pygame.image.load('Sprites/Player/player_stat.png').convert_alpha()
 shooting_player_image = pygame.image.load('Sprites/Player/player_aim.png').convert_alpha()
-
 enemy_img = pygame.image.load('Sprites/Enemy/enemy_stat.png').convert_alpha()
 bullet_img = scale_image(pygame.image.load('Sprites/Items/bullet.png').convert_alpha(), 0.3)
-coin_img = pygame.image.load('Sprites/Items/coin.png').convert_alpha()
+coin_img = scale_image(pygame.image.load('Sprites/Items/coin.png').convert_alpha(), 0.3)
 #endregion
 #endregion
 
@@ -90,6 +89,15 @@ def rotate_img(target_pos, current_pos, offset):
     # 0.3125 * (180 / pi) = angle is 17,9 graden
 
     return -angle + offset
+
+def outer_spawn_pos():
+        left_spawn_area = pygame.Vector2(0 - enemy_img.width, random.randint(0, display_info.current_h))
+        right_spawn_area = pygame.Vector2(display_info.current_w + enemy_img.width, random.randint(0, display_info.current_h))
+        top_spawn_area = pygame.Vector2(random.randint(0, display_info.current_w), 0 - enemy_img.height)
+        bottom_spawn_area = pygame.Vector2(random.randint(0, display_info.current_w), display_info.current_h + enemy_img.height)
+        list_of_pos = [left_spawn_area, right_spawn_area, top_spawn_area, bottom_spawn_area]
+        ran_pos = list_of_pos[random.randint(0, len(list_of_pos)- 1)]
+        return ran_pos
 
 class Player:
     def __init__(self):
@@ -189,10 +197,10 @@ class Bullet:
     def collision(self):
         global player_points
         global player_coins
-        for enemy in enemy_list:
+        for enemy in enemy_wave_1_list:
             collided = self.rect.colliderect(enemy)
             if collided:
-                enemy_list.remove(enemy)
+                enemy_wave_1_list.remove(enemy)
                 #Get points per hit, buying items or doing something
                 player_points += 18
                 #Get coins after killing a enemy
@@ -214,12 +222,11 @@ class Bullet:
 
 class Enemy:
     def __init__(self):
-        self.max_dist = 250
-        self.min_dist = 50
+        self.speed = 3
         self.original_image = enemy_img
         self.image = self.original_image
 
-        self.current_pos = random_pos()
+        self.current_pos = outer_spawn_pos()
         self.rect = pygame.Rect(self.current_pos.x, self.current_pos.y, self.image.width, self.image.height)
 
         #enemy base stats
@@ -236,7 +243,6 @@ class Enemy:
 
     def move_towards(self, target_pos):
         current_pos = pygame.math.Vector2(self.rect.x, self.rect.y)
-        distance = current_pos.distance_to(target_pos)
         direction = target_pos - current_pos
 
         try:
@@ -244,12 +250,8 @@ class Enemy:
         except ValueError:
             return "Cant normalize vector of zero"
 
-        if distance <= self.max_dist:
-            if distance <= self.min_dist:
-                return
-            else:
-                self.rot_enemy(target_pos)
-                self.rect.topleft += direction * 5
+        self.rot_enemy(target_pos)
+        self.rect.topleft += direction * self.speed
 
     def draw(self):
         pygame.draw.rect(screen, 'red', self.rect, 5) #border
@@ -268,22 +270,20 @@ class Item:
 
 class Coins(Item):
     def draw(self):
-        pygame.draw.rect(screen, 'red', self.rect, 5)
+        pygame.draw.rect(screen, 'red', self.rect, 1)
         screen.blit(self.coin_img, self.pos)
 
 class Wood(Item):
     def draw(self):
-        pygame.draw.rect(screen, 'red', self.rect, 5)
+        pygame.draw.rect(screen, 'red', self.rect, 1)
         screen.blit(self.coin_img, self.pos)
 
 class Stone(Item):
     def draw(self):
-        pygame.draw.rect(screen, 'red', self.rect, 5)
+        pygame.draw.rect(screen, 'red', self.rect, 1)
         screen.blit(self.coin_img, self.pos)
 
-for _ in range(10):
-    items_list.append(Stone())
-    items_list.append(Wood())
+for _ in range(20):
     items_list.append(Coins())
 
 def draw_items():
@@ -294,8 +294,11 @@ def draw_items():
 
 #region --- initialization ---
 #region -- initializing enemies --
-enemy_amount = 10
-enemy_list = [Enemy() for enemies in range(enemy_amount)]
+enemy_round_1_amount = 50
+enemy_wave_1_amount = 10
+enemy_wave_1_list = [Enemy() for enemies in range(enemy_wave_1_amount)]
+enemy_wave_2_list = [Enemy() for enemies in range(enemy_wave_1_amount)]
+
 #endregion
 
 #region -- initializing player --
@@ -316,6 +319,13 @@ while running:
     screen.fill('green')
     #endregion
 
+    #region -- time --
+    seconds = (pygame.time.get_ticks()-start_ticks)/1000
+    minutes = int(seconds // 60)
+    seconds = int(seconds % 60)
+    formatted_time = f"{minutes:02}:{seconds:02}"
+    #endregion
+
     #region --object update--
     player.manager()
 
@@ -327,17 +337,18 @@ while running:
 
     draw_items()
 
-    for enemies in enemy_list:
-        Enemy.manager(enemies, player.pos)
+    #region --enemy wave system--
+    wave_1_start_time = 4.0
+    if seconds >= wave_1_start_time:
+        if len(enemy_wave_1_list) < enemy_wave_1_amount:
+            enemy_wave_1_list.append(Enemy())
+        for enemies in enemy_wave_1_list:
+            Enemy.manager(enemies, player.pos)
     #endregion
 
     #region --UI update--
     mousex, mousey = get_mouse_pos()
     UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 100)
-    seconds = (pygame.time.get_ticks()-start_ticks)/1000
-    minutes = int(seconds // 60)
-    seconds = int(seconds % 60)
-    formatted_time = f"{minutes:02}:{seconds:02}"
     UI_items.set_text(f'Time: {formatted_time} \npoints: {player_points}\ncoins: {player_coins}')
     UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}\n')
     UI_Manager.update(clock.tick(60)/1000.0)
