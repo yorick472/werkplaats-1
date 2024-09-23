@@ -99,6 +99,10 @@ def outer_spawn_pos():
         ran_pos = list_of_pos[random.randint(0, len(list_of_pos)- 1)]
         return ran_pos
 
+def wave(enemy_count, enemy_type, enemy_wave_list):
+    print(enemy_count)
+    enemy_wave_list.append(enemy_type)
+
 class Player:
     def __init__(self):
         self.speed = 3
@@ -170,6 +174,7 @@ class Bullet:
     def __init__(self):
         self.is_alive = True
         self.speed = 25
+        self.damage = 25
 
         self.original_image = bullet_img
         self.image = self.original_image
@@ -197,10 +202,10 @@ class Bullet:
     def collision(self):
         global player_points
         global player_coins
-        for enemy in enemy_wave_1_list:
-            collided = self.rect.colliderect(enemy)
+        for target in enemy_wave_1_list:
+            collided = self.rect.colliderect(target)
             if collided:
-                enemy_wave_1_list.remove(enemy)
+                target.health -= self.damage
                 #Get points per hit, buying items or doing something
                 player_points += 18
                 #Get coins after killing a enemy
@@ -222,15 +227,16 @@ class Bullet:
 
 class Enemy:
     def __init__(self):
+        #enemy base stats
+        self.is_alive = True
+        self.health = 100
         self.speed = 3
+
         self.original_image = enemy_img
         self.image = self.original_image
 
         self.current_pos = outer_spawn_pos()
         self.rect = pygame.Rect(self.current_pos.x, self.current_pos.y, self.image.width, self.image.height)
-
-        #enemy base stats
-        self.enemy_health = 100
 
     def rot_enemy(self, target_pos):
         direction = pygame.Vector2(target_pos) - pygame.Vector2(self.rect.center)
@@ -258,6 +264,8 @@ class Enemy:
         screen.blit(self.image, self.rect)
 
     def manager(self, target_pos):
+        if self.health <= 0:
+            self.is_alive = False
         self.draw()
         self.move_towards(target_pos)
 
@@ -338,13 +346,20 @@ while running:
     draw_items()
 
     #region --enemy wave system--
+
     wave_1_start_time = 4.0
+    '''
     if seconds >= wave_1_start_time:
         if len(enemy_wave_1_list) < enemy_wave_1_amount:
             enemy_wave_1_list.append(Enemy())
-        for enemies in enemy_wave_1_list:
-            Enemy.manager(enemies, player.pos)
-    #endregion
+        
+    #endregion'''
+
+    for enemy in enemy_wave_1_list:
+        if enemy.is_alive:
+            Enemy.manager(enemy, player.pos)
+        else:
+            enemy_wave_1_list.remove(enemy)
 
     #region --UI update--
     mousex, mousey = get_mouse_pos()
