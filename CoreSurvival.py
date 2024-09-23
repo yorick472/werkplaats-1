@@ -7,14 +7,16 @@ pygame.init()
 
 #region --- variables ---
 #region --main loop variables--
+RUNNING, PAUSED, EXIT = 0, 1, 2
+state = RUNNING
 start_ticks = pygame.time.get_ticks()
-running = True
 display_info = pygame.display.Info()
 screen = pygame.display.set_mode(pygame.Vector2(display_info.current_w, display_info.current_h), pygame.FULLSCREEN)
 clock = pygame.time.Clock()
 #endregion
 
 #region --player stats--
+player_kill_count = 0
 player_points = 0
 player_coins = 0
 player_wood = 0
@@ -99,12 +101,28 @@ def outer_spawn_pos():
         ran_pos = list_of_pos[random.randint(0, len(list_of_pos)- 1)]
         return ran_pos
 
-def wave(enemy_count, enemy_type, enemy_wave_list):
-    print(enemy_count)
-    enemy_wave_list.append(enemy_type)
+def handle_input():
+    global state
+    key_hold = pygame.key.get_pressed()
+    key_press = pygame.key.get_just_pressed()
+    if key_press[pygame.K_RETURN]:
+        state = EXIT
+
+    if key_press[pygame.K_ESCAPE]:
+        print(state)
+        if state == RUNNING:
+            state = PAUSED
+        else:
+            state = RUNNING
+
+    if key_press[pygame.K_SPACE]:
+        bullet_list.append(Bullet())
+    player.move.x = (key_hold[pygame.K_d] - key_hold[pygame.K_a])
+    player.move.y = (key_hold[pygame.K_s] - key_hold[pygame.K_w])
 
 class Player:
     def __init__(self):
+        self.health = 100
         self.speed = 3
 
         self.original_idle_img = idle_player_image
@@ -127,17 +145,6 @@ class Player:
         self.pos.y += self.move.y * self.speed
         self.rect.center = (self.pos.x, self.pos.y)
 
-    def handle_input(self):
-        global running
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_ESCAPE]:
-            print(f'user input, Exit game')
-            running = False
-        if pygame.key.get_just_pressed()[pygame.K_SPACE]:
-            bullet_list.append(Bullet())
-        self.move.x = (keys[pygame.K_d] - keys[pygame.K_a])
-        self.move.y = (keys[pygame.K_s] - keys[pygame.K_w])
-
     def collision(self):
         global player_points
         global player_coins
@@ -153,9 +160,10 @@ class Player:
         screen.blit(self.current_image, (
         self.rect.centerx - self.current_image.get_width() / 2, self.rect.centery - self.current_image.get_height() / 2))
 
-    def manager(self):
-        self.handle_input()
+    #def die(self):
+        #if self.health <= 0:
 
+    def manager(self):
         if self.move:
             self.current_state = 'shooting'
             self.current_original_image = self.original_shooting_img
@@ -202,18 +210,10 @@ class Bullet:
     def collision(self):
         global player_points
         global player_coins
-        for target in enemy_wave_1_list:
-            collided = self.rect.colliderect(target)
-            if collided:
-                target.health -= self.damage
-                #Get points per hit, buying items or doing something
-                player_points += 18
-                #Get coins after killing a enemy
-                player_coins += 5
-                self.is_alive = False
-            if (self.rect.x <= 0 or self.rect.x >= display_info.current_w or
-                    self.rect.y <= 0 or self.rect.y > display_info.current_h):
-                self.is_alive = False
+
+        if (self.rect.x <= 0 or self.rect.x >= display_info.current_w or
+                self.rect.y <= 0 or self.rect.y > display_info.current_h):
+            self.is_alive = False
 
     def draw(self):
         pygame.draw.rect(screen, 'red', self.rect, 2) #border
@@ -235,8 +235,11 @@ class Enemy:
         self.original_image = enemy_img
         self.image = self.original_image
 
+        self.current_original_image = self.original_image
+        self.current_image = self.image
+
         self.current_pos = outer_spawn_pos()
-        self.rect = pygame.Rect(self.current_pos.x, self.current_pos.y, self.image.width, self.image.height)
+        self.rect = pygame.Rect(self.current_pos.x, self.current_pos.y, self.original_image.get_width(), self.original_image.get_height())
 
     def rot_enemy(self, target_pos):
         direction = pygame.Vector2(target_pos) - pygame.Vector2(self.rect.center)
@@ -245,7 +248,6 @@ class Enemy:
         #convert img rot to face towards player with offset since wrong front plane
         offset = -90
         self.image = pygame.transform.rotate(self.original_image, -angle + offset)
-        self.rect = self.image.get_rect(center=self.rect.center)
 
     def move_towards(self, target_pos):
         current_pos = pygame.math.Vector2(self.rect.x, self.rect.y)
@@ -256,18 +258,36 @@ class Enemy:
         except ValueError:
             return "Cant normalize vector of zero"
 
-        self.rot_enemy(target_pos)
+        #self.rot_enemy(target_pos)
         self.rect.topleft += direction * self.speed
 
     def draw(self):
         pygame.draw.rect(screen, 'red', self.rect, 5) #border
-        screen.blit(self.image, self.rect)
+        screen.blit(self.current_image, (self.rect.centerx - self.current_image.get_width() / 2, self.rect.centery - self.current_image.get_height() / 2))
+
+    def collision(self):
+        global player_points
+        global player_coins
+
+        for target in bullet_list:
+            collided = self.rect.colliderect(target)
+            if collided:
+                self.health -= target.damage
+                #Get points per hit, buying items or doing something
+                player_points += 13
+                #Get coins after killing a enemy
+                player_coins += 1
+                bullet_list.remove(target)
 
     def manager(self, target_pos):
         if self.health <= 0:
             self.is_alive = False
-        self.draw()
+
         self.move_towards(target_pos)
+        self.current_image = pygame.transform.rotate(self.original_image, rotate_img(target_pos, self.rect.center, IMAGE_OFFSET))
+        self.draw()
+        self.collision()
+
 
 #region -- item classes --
 class Item:
@@ -302,10 +322,25 @@ def draw_items():
 
 #region --- initialization ---
 #region -- initializing enemies --
+wave_1_start_time = 4.0
 enemy_round_1_amount = 50
 enemy_wave_1_amount = 10
-enemy_wave_1_list = [Enemy() for enemies in range(enemy_wave_1_amount)]
-enemy_wave_2_list = [Enemy() for enemies in range(enemy_wave_1_amount)]
+enemy_wave_2_list = [Enemy() for enemy in range(enemy_wave_1_amount)]
+enemy_wave_1_list = [Enemy() for enemy in range(enemy_wave_1_amount)]
+
+def wave():
+    global player_kill_count
+    global player_points
+    global player_coins
+
+    for enemy in enemy_wave_1_list:
+        if enemy.is_alive:
+            Enemy.manager(enemy, player.pos)
+        else:
+            player_kill_count += 1
+            player_points += 55
+            player_coins += 15
+            enemy_wave_1_list.remove(enemy)
 
 #endregion
 
@@ -315,65 +350,73 @@ player = Player()
 #endregion
 
 #region --- Main loop ---
-while running:
+while True:
     #region event loop
     for event in pygame.event.get():
+        #loops through events until no events left or break then loop through current state
         if event.type == pygame.QUIT:
-            running = False
+            print(f'break')
+            break
+        elif event.type == pygame.KEYDOWN:
+            handle_input()
         elif event.type == TIMER_EVENT:
             if frame == 3:
                 frame = 0
             else: frame += 1
-    screen.fill('green')
-    #endregion
+    else:
+        if state == RUNNING:
+            screen.fill('green')
+            #endregion
 
-    #region -- time --
-    seconds = (pygame.time.get_ticks()-start_ticks)/1000
-    minutes = int(seconds // 60)
-    seconds = int(seconds % 60)
-    formatted_time = f"{minutes:02}:{seconds:02}"
-    #endregion
+            #region -- time --
+            seconds = (pygame.time.get_ticks()-start_ticks)/1000
+            minutes = int(seconds // 60)
+            seconds = int(seconds % 60)
+            formatted_time = f"{minutes:02}:{seconds:02}"
+            #endregion
 
-    #region --object update--
-    player.manager()
+            #region --object update--
+            player.manager()
 
-    for bullet in bullet_list:
-        if bullet.is_alive:
-            Bullet.manager(bullet)
-        else:
-            bullet_list.remove(bullet)
+            for bullet in bullet_list:
+                if bullet.is_alive:
+                    Bullet.manager(bullet)
+                else:
+                    bullet_list.remove(bullet)
 
-    draw_items()
+            draw_items()
 
-    #region --enemy wave system--
+            #region --enemy wave system--
+            wave()
+            '''
+            if seconds >= wave_1_start_time:
+                if len(enemy_wave_1_list) < enemy_wave_1_amount:
+                    enemy_wave_1_list.append(Enemy())
+                
+            #endregion'''
 
-    wave_1_start_time = 4.0
-    '''
-    if seconds >= wave_1_start_time:
-        if len(enemy_wave_1_list) < enemy_wave_1_amount:
-            enemy_wave_1_list.append(Enemy())
-        
-    #endregion'''
+            #region --UI update--
+            mousex, mousey = get_mouse_pos()
+            UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 100)
+            UI_items.rect = pygame.Rect(0, 0, 150, 200)
+            UI_items.set_text(f'Time: {formatted_time}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}')
+            UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}\n')
+            UI_Manager.update(clock.tick(60)/1000.0)
+            UI_Manager.draw_ui(screen)
+            #endregion
 
-    for enemy in enemy_wave_1_list:
-        if enemy.is_alive:
-            Enemy.manager(enemy, player.pos)
-        else:
-            enemy_wave_1_list.remove(enemy)
-
-    #region --UI update--
-    mousex, mousey = get_mouse_pos()
-    UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 100)
-    UI_items.set_text(f'Time: {formatted_time} \npoints: {player_points}\ncoins: {player_coins}')
-    UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}\n')
-    UI_Manager.update(clock.tick(60)/1000.0)
-    UI_Manager.draw_ui(screen)
-    #endregion
-
-    #region Refresh screen and set fps
-    pygame.display.flip()
-    clock.tick(60)
-    #endregion
+            #region Refresh screen and set fps
+            pygame.display.flip()
+            clock.tick(60)
+            #endregion
+        if state == PAUSED:
+            ...
+            #paused state
+        if state == EXIT:
+            print(f'exit game')
+            break
+        continue
+    break
 #endregion
 
 #Quit if main loop breaks
