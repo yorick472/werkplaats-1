@@ -7,14 +7,15 @@ pygame.init()
 
 #region --- variables ---
 #region --main loop variables--
-RUNNING, PAUSED, EXIT = 0, 1, 2
+RUNNING, PAUSED, EXIT, START = 0, 1, 2, 3
 state = RUNNING
 start_ticks = pygame.time.get_ticks()
 display_info = pygame.display.Info()
 screen = pygame.display.set_mode(pygame.Vector2(display_info.current_w, display_info.current_h), pygame.FULLSCREEN)
 clock = pygame.time.Clock()
 #endregion
-
+game_start_scherm = True
+game_main = False
 #region --player stats--
 player_kill_count = 0
 player_points = 0
@@ -68,6 +69,13 @@ coin_img = scale_image(pygame.image.load('Sprites/Items/coin.png').convert_alpha
 #endregion
 
 #region --- Classes and functions ---
+def get_seconds():
+    seconds = (pygame.time.get_ticks() - start_ticks) / 1000
+    minutes = int(seconds // 60)
+    seconds = int(seconds % 60)
+    formatted_time = f"{minutes:02}:{seconds:02}"
+    return formatted_time
+
 def random_pos():
     return pygame.Vector2(random.randint(0, display_info.current_w), random.randint(0, display_info.current_h))
 
@@ -103,22 +111,24 @@ def outer_spawn_pos():
 
 def handle_input():
     global state
-    key_hold = pygame.key.get_pressed()
+    #key_hold = pygame.key.get_pressed()
     key_press = pygame.key.get_just_pressed()
+    if state == RUNNING:
+        # shooting
+        if key_press[pygame.K_SPACE]:
+            default_gun.shoot(Bullet())
+
+    #always work...
     if key_press[pygame.K_RETURN]:
         state = EXIT
 
+    #pause/unpause game
     if key_press[pygame.K_ESCAPE]:
         print(state)
         if state == RUNNING:
             state = PAUSED
         else:
             state = RUNNING
-
-    if key_press[pygame.K_SPACE]:
-        bullet_list.append(Bullet())
-    player.move.x = (key_hold[pygame.K_d] - key_hold[pygame.K_a])
-    player.move.y = (key_hold[pygame.K_s] - key_hold[pygame.K_w])
 
 class Player:
     def __init__(self):
@@ -139,6 +149,12 @@ class Player:
         self.move = pygame.Vector2(0, 0)
         self.pos = pygame.Vector2(center.x, center.y)
         self.rect = pygame.Rect(self.pos.x, self.pos.y, self.current_original_image.get_width(), self.current_original_image.get_height())
+
+    def add_speed(self):
+        key_hold = pygame.key.get_pressed()
+
+        self.move.x = (key_hold[pygame.K_d] - key_hold[pygame.K_a])
+        self.move.y = (key_hold[pygame.K_s] - key_hold[pygame.K_w])
 
     def move_pos(self):
         self.pos.x += self.move.x * self.speed
@@ -172,11 +188,45 @@ class Player:
             self.current_state = 'idle'
             self.current_original_image = self.original_idle_img
             self.current_image = self.idle_img
-
+        self.add_speed()
         self.move_pos()
         self.current_image = pygame.transform.rotate(self.current_image, rotate_img(get_mouse_pos(), self.rect.center, IMAGE_OFFSET))
         self.draw()
         self.collision()
+
+class Gun:
+    def __init__(self):
+        self.is_reloading = False
+        self.magazine_capacity = 5
+        self.magazine = self.magazine_capacity
+        self.reload_time = 1000
+
+    def shoot(self, bullet):
+        if self.is_reloading:
+            return
+        if self.magazine <= 0:
+            self.reload()
+        else:
+            self.magazine -= 1
+            bullet_list.append(bullet)
+
+    def reload(self):
+        self.is_reloading = True
+        start_time = pygame.time.get_ticks()
+        end_time = start_time + self.reload_time
+        current_time = pygame.time.get_ticks()
+        print(f'start: {start_time}, end: {end_time}, current: {current_time}')
+        if current_time >= end_time:
+            print(current_time)
+            self.magazine = self.magazine_capacity
+            self.is_reloading = False
+
+    def manager(self):
+        for bullet in bullet_list:
+            if bullet.is_alive:
+                Bullet.manager(bullet)
+            else:
+                bullet_list.remove(bullet)
 
 class Bullet:
     def __init__(self):
@@ -228,6 +278,8 @@ class Bullet:
 class Enemy:
     def __init__(self):
         #enemy base stats
+        self.idle, self.chase, self.attack = 0, 1, 2
+        self.state = self.chase
         self.is_alive = True
         self.health = 100
         self.speed = 3
@@ -250,16 +302,16 @@ class Enemy:
         self.image = pygame.transform.rotate(self.original_image, -angle + offset)
 
     def move_towards(self, target_pos):
-        current_pos = pygame.math.Vector2(self.rect.x, self.rect.y)
-        direction = target_pos - current_pos
+            current_pos = pygame.math.Vector2(self.rect.centerx, self.rect.centery)
+            direction = target_pos - current_pos
 
-        try:
-            direction.normalize_ip()
-        except ValueError:
-            return "Cant normalize vector of zero"
+            try:
+                direction.normalize_ip()
+            except ValueError:
+                return "Cant normalize vector of zero"
 
-        #self.rot_enemy(target_pos)
-        self.rect.topleft += direction * self.speed
+            #self.rot_enemy(target_pos)
+            self.rect.center += direction * self.speed
 
     def draw(self):
         pygame.draw.rect(screen, 'red', self.rect, 5) #border
@@ -279,15 +331,34 @@ class Enemy:
                 player_coins += 1
                 bullet_list.remove(target)
 
+    def enemy_covid(self):
+        #global covid
+        for enemy in all_enemies:
+            self_pos = pygame.Vector2(self.rect.centerx, self.rect.centery)
+            enemy_pos = pygame.Vector2(enemy.rect.centerx, enemy.rect.centery)
+            if self_pos == enemy_pos:
+                continue
+            else:
+                ...#covid = pygame.math.Vector2.distance_to(self_pos, enemy_pos)
+
     def manager(self, target_pos):
+        dist = pygame.math.Vector2.distance_to(pygame.Vector2(self.rect.centerx, self.rect.centery), target_pos)
+        if dist < 30:
+            self.state = self.attack
+        else:
+            self.state = self.chase
+
         if self.health <= 0:
             self.is_alive = False
 
-        self.move_towards(target_pos)
         self.current_image = pygame.transform.rotate(self.original_image, rotate_img(target_pos, self.rect.center, IMAGE_OFFSET))
         self.draw()
         self.collision()
 
+        if self.state == self.chase:
+            self.move_towards(target_pos)
+        elif self.state == self.attack:
+            ...#attack
 
 #region -- item classes --
 class Item:
@@ -322,30 +393,38 @@ def draw_items():
 
 #region --- initialization ---
 #region -- initializing enemies --
+all_enemies = []
 wave_1_start_time = 4.0
 enemy_round_1_amount = 50
 enemy_wave_1_amount = 10
 enemy_wave_2_list = [Enemy() for enemy in range(enemy_wave_1_amount)]
 enemy_wave_1_list = [Enemy() for enemy in range(enemy_wave_1_amount)]
 
+for enemy in enemy_wave_1_list:
+    all_enemies.append(enemy)
+
+#for enemy in enemy_wave_2_list:
+    #all_enemies.append(enemy)a
+
 def wave():
     global player_kill_count
     global player_points
     global player_coins
 
-    for enemy in enemy_wave_1_list:
+    for enemy in all_enemies:
         if enemy.is_alive:
-            Enemy.manager(enemy, player.pos)
+            Enemy.manager(enemy, pygame.Vector2(player.rect.centerx, player.rect.centery))
         else:
             player_kill_count += 1
             player_points += 55
             player_coins += 15
-            enemy_wave_1_list.remove(enemy)
+            all_enemies.remove(enemy)
 
 #endregion
 
 #region -- initializing player --
 player = Player()
+default_gun = Gun()
 #endregion
 #endregion
 
@@ -356,36 +435,29 @@ while True:
         #loops through events until no events left or break then loop through current state
         if event.type == pygame.QUIT:
             print(f'break')
+            game_main = False
             break
         elif event.type == pygame.KEYDOWN:
             handle_input()
+        elif event.type == pygame.KEYUP:
+            #if KEYUP_u
+            player.move.x = 0
+            player.move.y = 0
         elif event.type == TIMER_EVENT:
             if frame == 3:
                 frame = 0
             else: frame += 1
     else:
-        if state == RUNNING:
+        if state == START:
+            ...
+        elif state == RUNNING:
             screen.fill('green')
-            #endregion
-
-            #region -- time --
-            seconds = (pygame.time.get_ticks()-start_ticks)/1000
-            minutes = int(seconds // 60)
-            seconds = int(seconds % 60)
-            formatted_time = f"{minutes:02}:{seconds:02}"
             #endregion
 
             #region --object update--
             player.manager()
-
-            for bullet in bullet_list:
-                if bullet.is_alive:
-                    Bullet.manager(bullet)
-                else:
-                    bullet_list.remove(bullet)
-
+            default_gun.manager()
             draw_items()
-
             #region --enemy wave system--
             wave()
             '''
@@ -397,10 +469,10 @@ while True:
 
             #region --UI update--
             mousex, mousey = get_mouse_pos()
-            UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 100)
+            UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 120)
             UI_items.rect = pygame.Rect(0, 0, 150, 200)
-            UI_items.set_text(f'Time: {formatted_time}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}')
-            UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}\n')
+            UI_items.set_text(f'Time: {get_seconds()}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}')
+            UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}\nmagazine: {default_gun.magazine}')
             UI_Manager.update(clock.tick(60)/1000.0)
             UI_Manager.draw_ui(screen)
             #endregion
@@ -416,7 +488,6 @@ while True:
             print(f'exit game')
             break
         continue
-    break
 #endregion
 
 #Quit if main loop breaks
