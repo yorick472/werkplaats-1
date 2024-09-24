@@ -70,10 +70,14 @@ coin_img = scale_image(pygame.image.load('Sprites/Items/coin.png').convert_alpha
 #endregion
 
 #region --- Classes and functions ---
-def get_seconds():
-    seconds = (pygame.time.get_ticks() - start_ticks) / 1000
-    minutes = int(seconds // 60)
-    seconds = int(seconds % 60)
+def get_time():
+    time = (pygame.time.get_ticks() - start_ticks) / 1000
+    return time
+
+def convert_time():
+    time = get_time()
+    minutes = int(time // 60)
+    seconds = int(time % 60)
     formatted_time = f"{minutes:02}:{seconds:02}"
     return formatted_time
 
@@ -116,7 +120,7 @@ def handle_input():
     key_press = pygame.key.get_just_pressed()
     if state == RUNNING:
         # shooting
-        if pygame.key.get_just_pressed()[pygame.K_SPACE]:
+        if key_hold[pygame.K_SPACE]:
             default_gun.shoot()
             default_gun.is_holding = True
 
@@ -129,7 +133,6 @@ def handle_input():
 
     #pause/unpause game
     if key_press[pygame.K_ESCAPE]:
-        print(state)
         if state == RUNNING:
             state = PAUSED
         else:
@@ -226,7 +229,7 @@ class Gun:
         self.has_fired = False
         self.is_shooting = False
         self.start_shoot_time = None
-        self.fire_rate = 200.0
+        self.time_between_shot = 150.00
 
         self.is_reloading = False
         self.start_reload_time = None
@@ -243,7 +246,7 @@ class Gun:
     def shooting(self):
         if self.has_fired:
             elapsed_time = pygame.time.get_ticks() - self.start_shoot_time
-            if elapsed_time >= self.fire_rate:
+            if elapsed_time >= self.time_between_shot:
                 if self.is_holding:
                     self.ammo -= 1
                     bullet_list.append(Bullet())
@@ -388,7 +391,7 @@ class Enemy:
 
     def enemy_covid(self):
         #global covid
-        for enemy in all_enemies:
+        for enemy in wave_system.all_enemies:
             self_pos = pygame.Vector2(self.rect.centerx, self.rect.centery)
             enemy_pos = pygame.Vector2(enemy.rect.centerx, enemy.rect.centery)
             if self_pos == enemy_pos:
@@ -444,36 +447,108 @@ def draw_items():
     for item in items_list:
         item.draw()
 #endregion
+
+#region -- wave system --
+class WaveSystem:
+    def __init__(self):
+        self.STARTED, self.PAUSED, self.ENDED = 0, 1, 2
+        self.state = None
+
+        self.wave_started = False
+        self.start_time = 2000.0
+        self.round_ended = None
+        self.start_amount = 3
+        self.all_enemies = []
+
+
+        self.wave = 0
+        self.max_amount = 5
+        self.amount_left = self.max_amount
+        self.amount_spawned = 0
+
+        self.current_count = 0
+        self.current_max = 3
+
+        self.start_amount_increase = 3
+        self.current_max_increase = 3
+        self.max_amount_increase = 5
+
+
+    def spawn_enemy(self, enemy_amount):
+        if self.amount_spawned >= self.max_amount:
+            return
+        else:
+            for _ in range(enemy_amount):
+                self.amount_spawned += 1
+                self.all_enemies.append(Enemy())
+
+    def round(self, player_pos):
+        global player_kill_count
+        global player_points
+        global player_coins
+
+        if self.current_count < self.current_max:
+            self.spawn_enemy(1)
+
+        for enemy in self.all_enemies:
+            if enemy.is_alive:
+                Enemy.manager(enemy, player_pos)
+            else:
+                player_kill_count += 1
+                player_points += 55
+                player_coins += 15
+                self.amount_left -=1
+                self.all_enemies.remove(enemy)
+
+    def end_round(self):
+            self.state = self.PAUSED
+            self.wave_started = False
+            self.wave += 1
+            self.max_amount += self.max_amount_increase
+            self.amount_left = self.max_amount
+            self.start_amount += self.start_amount_increase
+            self.current_max += self.current_max_increase
+            self.amount_spawned = 0
+            self.round_ended = pygame.time.get_ticks()
+
+
+    def manager(self, player_pos):
+        self.current_count = len(self.all_enemies)
+
+        #start waves, change to player press button start
+        if pygame.key.get_just_pressed()[pygame.K_l] and not self.state:
+            self.state = self.STARTED
+
+        #start wave x time after last wave
+        elif self.state == self.PAUSED:
+            elapsed_time = pygame.time.get_ticks() - self.round_ended
+            if elapsed_time >= self.start_time:
+                self.state = self.STARTED
+
+        #wave started
+        elif self.state == self.STARTED:
+
+            if self.wave_started:
+                self.round(player_pos)
+            else:
+                self.wave_started = True
+                self.spawn_enemy(self.start_amount)
+
+            if self.amount_left <= 0:
+                self.state = self.ENDED
+
+        #wave ended
+        elif self.state == self.ENDED:
+            self.end_round()
+
+
+#endregion
+
 #endregion
 
 #region --- initialization ---
 #region -- initializing enemies --
-all_enemies = []
-wave_1_start_time = 4.0
-enemy_round_1_amount = 50
-enemy_wave_1_amount = 10
-enemy_wave_2_list = [Enemy() for enemy in range(enemy_wave_1_amount)]
-enemy_wave_1_list = [Enemy() for enemy in range(enemy_wave_1_amount)]
-
-for enemy in enemy_wave_1_list:
-    all_enemies.append(enemy)
-
-#for enemy in enemy_wave_2_list:
-    #all_enemies.append(enemy)a
-
-def wave():
-    global player_kill_count
-    global player_points
-    global player_coins
-
-    for enemy in all_enemies:
-        if enemy.is_alive:
-            Enemy.manager(enemy, pygame.Vector2(player.rect.centerx, player.rect.centery))
-        else:
-            player_kill_count += 1
-            player_points += 55
-            player_coins += 15
-            all_enemies.remove(enemy)
+wave_system = WaveSystem()
 
 #endregion
 
@@ -485,11 +560,10 @@ default_gun = Gun()
 
 #region --- Main loop ---
 while True:
-    #region event loop
+    #region -- event loop --
     for event in pygame.event.get():
         #loops through events until no events left or break then loop through current state
         if event.type == pygame.QUIT:
-            print(f'break')
             game_main = False
             break
         elif event.type == pygame.KEYDOWN:
@@ -504,31 +578,28 @@ while True:
             if frame == 3:
                 frame = 0
             else: frame += 1
+    #endregion
     else:
         if state == START:
             ...
         elif state == RUNNING:
             screen.fill('green')
-            #endregion
 
             #region --object update--
             player.manager()
             default_gun.manager()
             draw_items()
+            #endregion
+
             #region --enemy wave system--
-            wave()
-            '''
-            if seconds >= wave_1_start_time:
-                if len(enemy_wave_1_list) < enemy_wave_1_amount:
-                    enemy_wave_1_list.append(Enemy())
-                
-            #endregion'''
+            wave_system.manager(pygame.Vector2(player.rect.centerx, player.rect.centery))
+            #endregion
 
             #region --UI update--
             mousex, mousey = get_mouse_pos()
             UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 120)
             UI_items.rect = pygame.Rect(0, 0, 150, 200)
-            UI_items.set_text(f'Time: {get_seconds()}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}\n\nmagazine: {default_gun.ammo}')
+            UI_items.set_text(f'Time: {convert_time()}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}\n\nmagazine: {default_gun.ammo}')
             UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}')
             UI_Manager.update(clock.tick(60)/1000.0)
             UI_Manager.draw_ui(screen)
