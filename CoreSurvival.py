@@ -34,6 +34,7 @@ enemy_list = []
 center = pygame.Vector2(display_info.current_w / 2, display_info.current_h / 2)
 random_range_x = display_info.current_w
 random_range_y = display_info.current_h
+
 #endregion
 
 #region --UI initialization--
@@ -111,12 +112,16 @@ def outer_spawn_pos():
 
 def handle_input():
     global state
-    #key_hold = pygame.key.get_pressed()
+    key_hold = pygame.key.get_pressed()
     key_press = pygame.key.get_just_pressed()
     if state == RUNNING:
         # shooting
-        if key_press[pygame.K_SPACE]:
-            default_gun.shoot(Bullet())
+        if pygame.key.get_just_pressed()[pygame.K_SPACE]:
+            default_gun.shoot()
+            default_gun.is_holding = True
+
+        if key_press[pygame.K_r]:
+            default_gun.reload()
 
     #always work...
     if key_press[pygame.K_RETURN]:
@@ -133,7 +138,7 @@ def handle_input():
 class Player:
     def __init__(self):
         self.health = 100
-        self.speed = 3
+        self.speed = 4
 
         self.original_idle_img = idle_player_image
         self.idle_img = self.original_idle_img
@@ -157,6 +162,9 @@ class Player:
         self.move.y = (key_hold[pygame.K_s] - key_hold[pygame.K_w])
 
     def move_pos(self):
+        if self.move.x != 0 and self.move.y != 0:
+            self.move.x *= .75
+            self.move.y *= .75
         self.pos.x += self.move.x * self.speed
         self.pos.y += self.move.y * self.speed
         self.rect.center = (self.pos.x, self.pos.y)
@@ -170,6 +178,21 @@ class Player:
                 items_list.remove(item)
                 player_points += 9
                 player_coins += 10
+
+        half_width = self.rect.width / 2
+        half_height = self.rect.height / 2
+
+        if self.pos.x - half_width < 0:
+            self.pos.x = half_width
+
+        elif self.pos.x + half_width > display_info.current_w:
+            self.pos.x = display_info.current_w - half_width
+
+        elif self.pos.y - half_height < 0:
+            self.pos.y = half_height
+
+        elif self.pos.y + half_height > display_info.current_h:
+            self.pos.y = display_info.current_h - half_height
 
     def draw(self):
         pygame.draw.rect(screen, 'red', self.rect, 5)
@@ -196,32 +219,63 @@ class Player:
 
 class Gun:
     def __init__(self):
-        self.is_reloading = False
-        self.magazine_capacity = 5
-        self.magazine = self.magazine_capacity
-        self.reload_time = 1000
+        self.magazine_capacity = 20
+        self.ammo = self.magazine_capacity
 
-    def shoot(self, bullet):
-        if self.is_reloading:
-            return
-        if self.magazine <= 0:
+        self.is_holding = False
+        self.has_fired = False
+        self.is_shooting = False
+        self.start_shoot_time = None
+        self.fire_rate = 200.0
+
+        self.is_reloading = False
+        self.start_reload_time = None
+        self.reload_time = 2000.0
+
+    def shoot(self):
+        if self.ammo <= 0:
+            self.is_reloading = True
             self.reload()
+            return
+        self.is_shooting = True
+        self.start_shoot_time = pygame.time.get_ticks()
+
+    def shooting(self):
+        if self.has_fired:
+            elapsed_time = pygame.time.get_ticks() - self.start_shoot_time
+            if elapsed_time >= self.fire_rate:
+                if self.is_holding:
+                    self.ammo -= 1
+                    bullet_list.append(Bullet())
+                    self.is_shooting = False
+                    self.shoot()
+                else:
+                    self.is_shooting = False
+                    self.has_fired = False
         else:
-            self.magazine -= 1
-            bullet_list.append(bullet)
+            self.ammo -= 1
+            bullet_list.append(Bullet())
+            self.has_fired = True
 
     def reload(self):
-        self.is_reloading = True
-        start_time = pygame.time.get_ticks()
-        end_time = start_time + self.reload_time
-        current_time = pygame.time.get_ticks()
-        print(f'start: {start_time}, end: {end_time}, current: {current_time}')
-        if current_time >= end_time:
-            print(current_time)
-            self.magazine = self.magazine_capacity
+        default_gun.is_reloading = True
+        self.start_reload_time = pygame.time.get_ticks()
+
+    def reloading(self):
+        elapsed_time = pygame.time.get_ticks() - self.start_reload_time
+        if elapsed_time >= self.reload_time:
             self.is_reloading = False
+            self.ammo = self.magazine_capacity
+            if self.is_holding:
+                self.shoot()
 
     def manager(self):
+        if self.is_shooting:
+            self.shooting()
+
+        if self.is_reloading:
+            self.reloading()
+
         for bullet in bullet_list:
             if bullet.is_alive:
                 Bullet.manager(bullet)
@@ -283,6 +337,7 @@ class Enemy:
         self.is_alive = True
         self.health = 100
         self.speed = 3
+        self.target_distance = 70
 
         self.original_image = enemy_img
         self.image = self.original_image
@@ -343,7 +398,7 @@ class Enemy:
 
     def manager(self, target_pos):
         dist = pygame.math.Vector2.distance_to(pygame.Vector2(self.rect.centerx, self.rect.centery), target_pos)
-        if dist < 30:
+        if dist < self.target_distance:
             self.state = self.attack
         else:
             self.state = self.chase
@@ -440,6 +495,8 @@ while True:
         elif event.type == pygame.KEYDOWN:
             handle_input()
         elif event.type == pygame.KEYUP:
+            if event.key == pygame.K_SPACE:
+                default_gun.is_holding = False
             #if KEYUP_u
             player.move.x = 0
             player.move.y = 0
@@ -471,8 +528,8 @@ while True:
             mousex, mousey = get_mouse_pos()
             UI_mouse_pos.rect = pygame.Rect(mousex, mousey, 200, 120)
             UI_items.rect = pygame.Rect(0, 0, 150, 200)
-            UI_items.set_text(f'Time: {get_seconds()}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}')
-            UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}\nmagazine: {default_gun.magazine}')
+            UI_items.set_text(f'Time: {get_seconds()}\nKills: {player_kill_count}\npoints: {player_points}\ncoins: {player_coins}\n\nmagazine: {default_gun.ammo}')
+            UI_mouse_pos.set_text(f'playerpos: {player.rect.centerx},{player.rect.centery}\nmousepos: {mousex}, {mousey}\ndistance: {get_direction(get_mouse_pos(), player.rect.center)}')
             UI_Manager.update(clock.tick(60)/1000.0)
             UI_Manager.draw_ui(screen)
             #endregion
